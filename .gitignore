@@ -6,3 +6,6 @@ __pycache__/
 build/
 .env
 .env.*
+*.db
+*.db-wal
+*.db-shm
