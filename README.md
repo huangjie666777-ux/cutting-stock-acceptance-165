@@ -58,7 +58,7 @@ FastAPI + OR-Tools CP-SAT 的整数优化排料服务。无前端。
 .venv/bin/python -m pytest tests -q
 curl -s -X POST http://127.0.0.1:8154/optimize \
   -H 'Content-Type: application/json' \
-  -d @examples/sample_request.json | python3 -m json.tool
+  -d `examples/sample_request.json | python3 -m json.tool
 ```
 
 ## 代码结构
@@ -67,3 +67,52 @@ curl -s -X POST http://127.0.0.1:8154/optimize \
 - `app/solver.py` — CP-SAT 建模与分阶段字典序优化
 - `app/accounting.py` — 排料结果核算与长度守恒校验
 - `app/main.py` — HTTP 层、并发限制、线程池求解
+
+## 批次抽样验收
+
+在排料求解之上提供按批次的抽样验收（超几何分布，精确组合数判定，无二项近似、无浮点放宽）。
+长度单位：请求中成品标称长度为整数毫米，冻结时转为整数微米；公差偏差与测量值均为整数微米，边界值判定为合格（含边界）。
+
+### POST /batches
+请求体（示例见 `examples/batch_request.json`）：
+
+| 字段 | 说明 |
+|---|---|
+| `batch_id` | 批次 ID（字符串或整数，拒绝布尔） |
+| `optimize` | 完整的 `/optimize` 请求体，复用同一求解与核算 |
+| `tolerances` | 按 `str(需求id)` 为键的 `{lower_dev_um, upper_dev_um}`，每个需求必须恰好一条；`lower > upper` 视为公差倒置拒绝 |
+| `dg` / `db` | 总体可接受/不可接受缺陷数，须满足 `0 <= Dg < Db <= N`（N 为成品总数） |
+| `alpha` / `beta` | 生产方/使用方风险，(0,1) 区间内的十进制字符串 |
+
+行为：
+
+- 仅当求解得到完整解（`OPTIMAL`/`FEASIBLE`）才建批；否则返回 `batch_created: false`，不落库。
+- 建批时冻结：排料方案、全部成品实例及来源、各需求公差，并在 `1<=n<=N`、`0<=c<n` 内求最小 n 再最小 c，
+  满足 `P(拒收|Dg) <= alpha` 且 `P(允收|Db) <= beta`（超几何分布，Fraction 精确比较）。
+  响应含 `sampling.sample_size/acceptance` 及实际风险（十进制字符串与精确分数）。
+- 均匀无放回抽取 n 个实例并固定，随批次持久化。
+- 幂等：同批次同内容重发返回 200 与原方案、原样本；同批次异内容返回 409。并发建批只生效一次，失败不留半份状态（单事务写入）。
+
+### POST /batches/{batch_id}/measurements
+请求体 `{demand_id, instance, measured_um}`。仅接受样本内实例（否则 422）；
+同值重送幂等返回当前状态，异值不覆盖返回 409。样本未齐不下结论；齐全后缺陷数 `<= c` 则 `ACCEPT`，否则 `REJECT`，结论不可变。
+
+### GET /batches/{batch_id}
+查询批次：冻结方案、抽样参数、全部样本及测量值、结论。批次不存在返回 404。
+
+### 存储
+
+SQLite（环境变量 `BATCH_DB_PATH`，默认 `./batches.db`）保存批次、样本、测量与结论，重启后续检。
+
+### 其他校验变更
+
+- `/optimize` 与 `/batches` 现在拒绝 `new_stock` 与 `remnants` 之间跨列表重复 ID（422）。
+
+### 示例
+
+~~~bash
+BATCH_DB_PATH=/tmp/batches.db .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8154
+curl -s -X POST http://127.0.0.1:8154/batches -H 'Content-Type: application/json' -d `examples/batch_request.json
+curl -s -X POST http://127.0.0.1:8154/batches/BATCH-2026-001/measurements -H 'Content-Type: application/json' -d '{"demand_id":"D1","instance":2,"measured_um":1201500}'
+curl -s http://127.0.0.1:8154/batches/BATCH-2026-001
+~~~

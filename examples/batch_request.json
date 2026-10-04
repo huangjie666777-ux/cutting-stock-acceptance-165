@@ -1,0 +1,24 @@
+{
+  "batch_id": "BATCH-2026-001",
+  "optimize": {
+    "demands": [
+      {"id": "D1", "material": "AL6061", "length": 1200, "quantity": 4},
+      {"id": "D2", "material": "AL6061", "length": 800, "quantity": 3}
+    ],
+    "new_stock": [
+      {"id": "N1", "material": "AL6061", "length": 6000, "price": 15000, "available": 3}
+    ],
+    "remnants": [],
+    "kerf": 5,
+    "tail_threshold": 300,
+    "budget_ms": 5000
+  },
+  "tolerances": {
+    "D1": {"lower_dev_um": -1500, "upper_dev_um": 2000},
+    "D2": {"lower_dev_um": -1000, "upper_dev_um": 1000}
+  },
+  "dg": 0,
+  "db": 3,
+  "alpha": "0.05",
+  "beta": "0.10"
+}

@@ -82,6 +82,11 @@ class OptimizeRequest(BaseModel):
                 if key in seen:
                     raise ValueError(f"duplicate id in {group_name}: {entry.id!r}")
                 seen.add(key)
+        stock_ids = {s.id for s in self.new_stock}
+        remnant_ids = {r.id for r in self.remnants}
+        overlap = stock_ids & remnant_ids
+        if overlap:
+            raise ValueError(f"duplicate id across new_stock and remnants: {sorted(overlap, key=repr)!r}")
         total_items = sum(d.quantity for d in self.demands)
         if total_items > MAX_ITEMS:
             raise ValueError(f"too many demand pieces: {total_items} > {MAX_ITEMS}")
